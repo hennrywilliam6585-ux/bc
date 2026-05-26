@@ -105,9 +105,12 @@ export default function ImportWizard() {
       const res = await fetch(`/api/imports/${importType}`, { method: "POST", body: formData });
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(errText || `HTTP ${res.status}`);
+        let errMsg = `HTTP ${res.status}`;
+        try { const parsed = JSON.parse(errText); errMsg = parsed.error ?? parsed.message ?? errMsg; } catch { if (errText) errMsg = errText; }
+        throw new Error(errMsg);
       }
-      const job = await res.json() as { id: string };
+      const rawBody = await res.text();
+      const job = (rawBody.trim() ? JSON.parse(rawBody) : {}) as { id: string };
       queryClient.invalidateQueries({ queryKey: getListImportJobsQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetImportStatsQueryKey() });
       clearFile();

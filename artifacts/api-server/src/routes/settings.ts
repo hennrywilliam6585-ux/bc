@@ -164,7 +164,14 @@ router.get("/settings/webhooks", async (req, res): Promise<void> => {
     return;
   }
 
-  const webhooks = (await bcRes.json()) as BCWebhook[];
+  let webhooks: BCWebhook[];
+  try {
+    const raw = await bcRes.text();
+    webhooks = raw.trim() ? (JSON.parse(raw) as BCWebhook[]) : [];
+  } catch {
+    res.status(502).json({ error: "BigCommerce returned an unexpected response when listing webhooks" });
+    return;
+  }
   res.json({ webhooks: Array.isArray(webhooks) ? webhooks : [] });
 });
 
@@ -202,7 +209,14 @@ router.post("/settings/webhooks", async (req, res): Promise<void> => {
     return;
   }
 
-  const webhook = (await bcRes.json()) as BCWebhook;
+  let webhook: BCWebhook;
+  try {
+    const raw = await bcRes.text();
+    webhook = JSON.parse(raw) as BCWebhook;
+  } catch {
+    res.status(502).json({ error: "BigCommerce returned an unexpected response when creating webhook" });
+    return;
+  }
   res.status(201).json(webhook);
 });
 

@@ -23,12 +23,25 @@ export async function validateStore(creds: BigCommerceCredentials): Promise<{ va
     });
     if (!res.ok) {
       const err = await res.text();
-      return { valid: false, error: `HTTP ${res.status}: ${err}` };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, error: "Invalid access token — please check your BigCommerce API credentials." };
+      }
+      if (res.status === 404) {
+        return { valid: false, error: "Store not found — please check your store hash." };
+      }
+      return { valid: false, error: `BigCommerce returned HTTP ${res.status}: ${err.slice(0, 200)}` };
     }
-    const data = await res.json() as { name?: string };
+    let data: { name?: string } = {};
+    try {
+      const raw = await res.text();
+      if (raw.trim()) data = JSON.parse(raw) as { name?: string };
+    } catch {
+      // Response wasn't JSON — still treat as valid if status was ok
+    }
     return { valid: true, storeName: data.name };
   } catch (e) {
-    return { valid: false, error: e instanceof Error ? e.message : String(e) };
+    const msg = e instanceof Error ? e.message : String(e);
+    return { valid: false, error: `Could not reach BigCommerce API: ${msg}` };
   }
 }
 
