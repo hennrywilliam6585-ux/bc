@@ -102,7 +102,12 @@ export default function ImportWizard() {
       }
       formData.append("file", file);
 
-      const res = await fetch(`/api/imports/${importType}`, { method: "POST", body: formData });
+      const currentUserId = sessionStorage.getItem("bc_importer_user") ?? "";
+      const res = await fetch(`/api/imports/${importType}`, {
+        method: "POST",
+        headers: { "X-User-Id": currentUserId },
+        body: formData,
+      });
       if (!res.ok) {
         const errText = await res.text();
         let errMsg = `HTTP ${res.status}`;

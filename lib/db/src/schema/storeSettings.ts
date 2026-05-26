@@ -1,7 +1,7 @@
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const storeSettingsTable = pgTable("store_settings", {
-  id: text("id").primaryKey().default("default"),
+  userId: text("id").primaryKey(),
   storeHash: text("store_hash").notNull(),
   accessToken: text("access_token").notNull(),
   clientId: text("client_id"),

@@ -170,7 +170,7 @@ export async function runImportJob(jobId: string): Promise<void> {
   logger.info({ jobId, processed, success, failed }, "Import job completed");
 }
 
-export async function retryFailedRowsForJob(originalJobId: string): Promise<string> {
+export async function retryFailedRowsForJob(originalJobId: string, userId?: string): Promise<string> {
   const [originalJob] = await db.select().from(importJobsTable).where(eq(importJobsTable.id, originalJobId));
   if (!originalJob) throw new Error("Job not found");
 
@@ -192,6 +192,7 @@ export async function retryFailedRowsForJob(originalJobId: string): Promise<stri
   const newJobId = randomUUID();
   await db.insert(importJobsTable).values({
     id: newJobId,
+    userId: userId ?? originalJob.userId,
     type: originalJob.type,
     status: "pending",
     totalRows: retryRows.length,

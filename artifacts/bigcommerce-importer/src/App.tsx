@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setUserId } from "@workspace/api-client-react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -34,13 +35,16 @@ function Router({ onSignOut }: { onSignOut: () => void }) {
 }
 
 function App() {
-  const [loggedInUser, setLoggedInUser] = useState<string | null>(
-    () => sessionStorage.getItem(SESSION_KEY)
-  );
+  const [loggedInUser, setLoggedInUser] = useState<string | null>(() => {
+    const stored = sessionStorage.getItem(SESSION_KEY);
+    if (stored) setUserId(stored);
+    return stored;
+  });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const forceLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
+    setUserId(null);
     setLoggedInUser(null);
     queryClient.clear();
   };
@@ -77,6 +81,7 @@ function App() {
 
   const handleLogin = (userId: string) => {
     sessionStorage.setItem(SESSION_KEY, userId);
+    setUserId(userId);
     setLoggedInUser(userId);
   };
 

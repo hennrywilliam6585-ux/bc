@@ -1,11 +1,14 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { db, storeSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { validateStore } from "../lib/bigcommerce.js";
 
 const router: IRouter = Router();
 
-const SETTINGS_ID = "default";
+function getUserId(req: Request): string | null {
+  const id = req.headers["x-user-id"];
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
 
 function maskSecret(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -45,21 +48,17 @@ async function bcRequest(
 
 // GET /settings
 router.get("/settings", async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
+
   const rows = await db
     .select()
     .from(storeSettingsTable)
-    .where(eq(storeSettingsTable.id, SETTINGS_ID))
+    .where(eq(storeSettingsTable.userId, userId))
     .limit(1);
 
   if (rows.length === 0) {
-    res.json({
-      configured: false,
-      storeHash: null,
-      clientId: null,
-      storeName: null,
-      storeUrl: null,
-      updatedAt: null,
-    });
+    res.json({ configured: false, storeHash: null, clientId: null, storeName: null, storeUrl: null, updatedAt: null });
     return;
   }
 
@@ -78,11 +77,11 @@ router.get("/settings", async (req, res): Promise<void> => {
 
 // PUT /settings
 router.put("/settings", async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
+
   const { storeHash, accessToken, clientId, clientSecret } = req.body as {
-    storeHash?: string;
-    accessToken?: string;
-    clientId?: string;
-    clientSecret?: string;
+    storeHash?: string; accessToken?: string; clientId?: string; clientSecret?: string;
   };
 
   if (!storeHash || !accessToken) {
@@ -90,14 +89,12 @@ router.put("/settings", async (req, res): Promise<void> => {
     return;
   }
 
-  // Validate and fetch store details
   const validation = await validateStore({ storeHash, accessToken });
   if (!validation.valid) {
     res.status(422).json({ error: validation.error ?? "Invalid credentials" });
     return;
   }
 
-  // Fetch store URL
   let storeUrl: string | null = null;
   try {
     const infoRes = await bcRequest(storeHash, accessToken, "GET", "/store");
@@ -105,51 +102,25 @@ router.put("/settings", async (req, res): Promise<void> => {
       const info = (await infoRes.json()) as { domain?: string; secure_url?: string };
       storeUrl = info.secure_url ?? info.domain ?? null;
     }
-  } catch {
-    // best-effort
-  }
+  } catch { /* best-effort */ }
 
   await db
     .insert(storeSettingsTable)
-    .values({
-      id: SETTINGS_ID,
-      storeHash,
-      accessToken,
-      clientId: clientId ?? null,
-      clientSecret: clientSecret ?? null,
-      storeName: validation.storeName ?? null,
-      storeUrl,
-      updatedAt: new Date(),
-    })
+    .values({ userId, storeHash, accessToken, clientId: clientId ?? null, clientSecret: clientSecret ?? null, storeName: validation.storeName ?? null, storeUrl, updatedAt: new Date() })
     .onConflictDoUpdate({
-      target: storeSettingsTable.id,
-      set: {
-        storeHash,
-        accessToken,
-        clientId: clientId ?? null,
-        clientSecret: clientSecret ?? null,
-        storeName: validation.storeName ?? null,
-        storeUrl,
-        updatedAt: new Date(),
-      },
+      target: storeSettingsTable.userId,
+      set: { storeHash, accessToken, clientId: clientId ?? null, clientSecret: clientSecret ?? null, storeName: validation.storeName ?? null, storeUrl, updatedAt: new Date() },
     });
 
-  res.json({
-    configured: true,
-    storeHash,
-    storeName: validation.storeName ?? null,
-    storeUrl,
-  });
+  res.json({ configured: true, storeHash, storeName: validation.storeName ?? null, storeUrl });
 });
 
 // GET /settings/webhooks
 router.get("/settings/webhooks", async (req, res): Promise<void> => {
-  const rows = await db
-    .select()
-    .from(storeSettingsTable)
-    .where(eq(storeSettingsTable.id, SETTINGS_ID))
-    .limit(1);
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
 
+  const rows = await db.select().from(storeSettingsTable).where(eq(storeSettingsTable.userId, userId)).limit(1);
   if (rows.length === 0) {
     res.status(422).json({ error: "Store not configured. Save settings first." });
     return;
@@ -177,12 +148,10 @@ router.get("/settings/webhooks", async (req, res): Promise<void> => {
 
 // POST /settings/webhooks
 router.post("/settings/webhooks", async (req, res): Promise<void> => {
-  const rows = await db
-    .select()
-    .from(storeSettingsTable)
-    .where(eq(storeSettingsTable.id, SETTINGS_ID))
-    .limit(1);
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
 
+  const rows = await db.select().from(storeSettingsTable).where(eq(storeSettingsTable.userId, userId)).limit(1);
   if (rows.length === 0) {
     res.status(422).json({ error: "Store not configured. Save settings first." });
     return;
@@ -196,12 +165,7 @@ router.post("/settings/webhooks", async (req, res): Promise<void> => {
     return;
   }
 
-  const bcRes = await bcRequest(storeHash, accessToken, "POST", "/hooks", {
-    scope,
-    destination,
-    is_active: true,
-    headers: {},
-  });
+  const bcRes = await bcRequest(storeHash, accessToken, "POST", "/hooks", { scope, destination, is_active: true, headers: {} });
 
   if (!bcRes.ok) {
     const text = await bcRes.text();
@@ -222,12 +186,10 @@ router.post("/settings/webhooks", async (req, res): Promise<void> => {
 
 // DELETE /settings/webhooks/:webhookId
 router.delete("/settings/webhooks/:webhookId", async (req, res): Promise<void> => {
-  const rows = await db
-    .select()
-    .from(storeSettingsTable)
-    .where(eq(storeSettingsTable.id, SETTINGS_ID))
-    .limit(1);
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
 
+  const rows = await db.select().from(storeSettingsTable).where(eq(storeSettingsTable.userId, userId)).limit(1);
   if (rows.length === 0) {
     res.status(422).json({ error: "Store not configured." });
     return;
@@ -236,12 +198,7 @@ router.delete("/settings/webhooks/:webhookId", async (req, res): Promise<void> =
   const { storeHash, accessToken } = rows[0];
   const { webhookId } = req.params;
 
-  const bcRes = await bcRequest(
-    storeHash,
-    accessToken,
-    "DELETE",
-    `/hooks/${webhookId}`
-  );
+  const bcRes = await bcRequest(storeHash, accessToken, "DELETE", `/hooks/${webhookId}`);
 
   if (!bcRes.ok && bcRes.status !== 204) {
     const text = await bcRes.text();

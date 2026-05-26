@@ -17,6 +17,11 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _userId: string | null = null;
+
+export function setUserId(userId: string | null): void {
+  _userId = userId;
+}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -347,6 +352,10 @@ export async function customFetch<T = unknown>(
 
   if (responseType === "json" && !headers.has("accept")) {
     headers.set("accept", DEFAULT_JSON_ACCEPT);
+  }
+
+  if (_userId && !headers.has("x-user-id")) {
+    headers.set("x-user-id", _userId);
   }
 
   // Attach bearer token when an auth getter is configured and no
