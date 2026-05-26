@@ -1,0 +1,266 @@
+export interface BigCommerceCredentials {
+  storeHash: string;
+  accessToken: string;
+}
+
+const baseUrl = (storeHash: string) =>
+  `https://api.bigcommerce.com/stores/${storeHash}/v2`;
+const v3Url = (storeHash: string) =>
+  `https://api.bigcommerce.com/stores/${storeHash}/v3`;
+
+function headers(accessToken: string) {
+  return {
+    "X-Auth-Token": accessToken,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+}
+
+export async function validateStore(creds: BigCommerceCredentials): Promise<{ valid: boolean; storeName?: string; error?: string }> {
+  try {
+    const res = await fetch(`${baseUrl(creds.storeHash)}/store`, {
+      headers: headers(creds.accessToken),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { valid: false, error: `HTTP ${res.status}: ${err}` };
+    }
+    const data = await res.json() as { name?: string };
+    return { valid: true, storeName: data.name };
+  } catch (e) {
+    return { valid: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function createCustomer(
+  creds: BigCommerceCredentials,
+  row: Record<string, string>
+): Promise<{ success: boolean; entityId?: string; error?: string }> {
+  const payload = {
+    first_name: row.first_name || "",
+    last_name: row.last_name || "",
+    email: row.email || "",
+    phone: row.phone || "",
+    company: row.company || "",
+  };
+  const res = await fetch(`${v3Url(creds.storeHash)}/customers`, {
+    method: "POST",
+    headers: headers(creds.accessToken),
+    body: JSON.stringify([payload]),
+  });
+  if (res.status === 429) return { success: false, error: "Rate limit exceeded (429)" };
+  if (!res.ok) {
+    const err = await res.text();
+    return { success: false, error: `HTTP ${res.status}: ${err}` };
+  }
+  const data = await res.json() as { data?: Array<{ id: number }> };
+  const entityId = data.data?.[0]?.id?.toString();
+  return { success: true, entityId };
+}
+
+export async function createProduct(
+  creds: BigCommerceCredentials,
+  row: Record<string, string>
+): Promise<{ success: boolean; entityId?: string; error?: string }> {
+  const payload = {
+    name: row.name || "",
+    type: row.type || "physical",
+    price: parseFloat(row.price) || 0,
+    sku: row.sku || "",
+    weight: parseFloat(row.weight) || 0,
+    description: row.description || "",
+    inventory_level: parseInt(row.inventory_level, 10) || 0,
+  };
+  const res = await fetch(`${v3Url(creds.storeHash)}/catalog/products`, {
+    method: "POST",
+    headers: headers(creds.accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 429) return { success: false, error: "Rate limit exceeded (429)" };
+  if (!res.ok) {
+    const err = await res.text();
+    return { success: false, error: `HTTP ${res.status}: ${err}` };
+  }
+  const data = await res.json() as { data?: { id: number } };
+  const entityId = data.data?.id?.toString();
+  return { success: true, entityId };
+}
+
+export async function findOrCreateCustomerByEmail(
+  creds: BigCommerceCredentials,
+  email: string,
+  firstName: string,
+  lastName: string
+): Promise<{ customerId?: number; error?: string }> {
+  const searchRes = await fetch(
+    `${v3Url(creds.storeHash)}/customers?email:in=${encodeURIComponent(email)}`,
+    { headers: headers(creds.accessToken) }
+  );
+  if (searchRes.ok) {
+    const data = await searchRes.json() as { data?: Array<{ id: number }> };
+    if (data.data && data.data.length > 0) {
+      return { customerId: data.data[0].id };
+    }
+  }
+  const createRes = await fetch(`${v3Url(creds.storeHash)}/customers`, {
+    method: "POST",
+    headers: headers(creds.accessToken),
+    body: JSON.stringify([{ email, first_name: firstName, last_name: lastName }]),
+  });
+  if (!createRes.ok) {
+    const err = await createRes.text();
+    return { error: `Failed to create customer: HTTP ${createRes.status}: ${err}` };
+  }
+  const created = await createRes.json() as { data?: Array<{ id: number }> };
+  if (!created.data || created.data.length === 0) {
+    return { error: "Customer creation returned no data" };
+  }
+  return { customerId: created.data[0].id };
+}
+
+export async function findProductBySku(
+  creds: BigCommerceCredentials,
+  sku: string
+): Promise<{ productId?: number; variantId?: number; price?: number; error?: string }> {
+  const res = await fetch(
+    `${v3Url(creds.storeHash)}/catalog/products?sku=${encodeURIComponent(sku)}&include=variants`,
+    { headers: headers(creds.accessToken) }
+  );
+  if (!res.ok) {
+    return { error: `SKU lookup failed: HTTP ${res.status}` };
+  }
+  const data = await res.json() as { data?: Array<{ id: number; price: number; variants?: Array<{ id: number }> }> };
+  if (!data.data || data.data.length === 0) {
+    return { error: `Product with SKU "${sku}" not found` };
+  }
+  const product = data.data[0];
+  const variantId = product.variants?.[0]?.id;
+  return { productId: product.id, variantId, price: product.price };
+}
+
+export async function createOrder(
+  creds: BigCommerceCredentials,
+  row: Record<string, string>,
+  customerId: number,
+  productId: number,
+  variantId: number | undefined,
+  price: number
+): Promise<{ success: boolean; entityId?: string; error?: string }> {
+  const qty = parseInt(row.quantity, 10) || 1;
+  const payload = {
+    customer_id: customerId,
+    billing_address: {
+      first_name: row.first_name || "",
+      last_name: row.last_name || "",
+      street_1: row.street_1 || row.street || "",
+      city: row.city || "",
+      country: row.country || "",
+      country_iso2: row.country_iso2 || "",
+      state: row.state || "",
+      zip: row.zip || "",
+      email: row.email || "",
+    },
+    shipping_addresses: [
+      {
+        first_name: row.first_name || "",
+        last_name: row.last_name || "",
+        street_1: row.street_1 || row.street || "",
+        city: row.city || "",
+        country: row.country || "",
+        country_iso2: row.country_iso2 || "",
+        state: row.state || "",
+        zip: row.zip || "",
+        email: row.email || "",
+      },
+    ],
+    products: [
+      {
+        product_id: productId,
+        quantity: qty,
+        price_inc_tax: price,
+        price_ex_tax: price,
+        ...(variantId ? { variant_id: variantId } : {}),
+      },
+    ],
+  };
+  const res = await fetch(`${baseUrl(creds.storeHash)}/orders`, {
+    method: "POST",
+    headers: headers(creds.accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 429) return { success: false, error: "Rate limit exceeded (429)" };
+  if (!res.ok) {
+    const err = await res.text();
+    return { success: false, error: `HTTP ${res.status}: ${err}` };
+  }
+  const data = await res.json() as { id?: number };
+  const entityId = data.id?.toString();
+  return { success: true, entityId };
+}
+
+export async function addShipment(
+  creds: BigCommerceCredentials,
+  orderId: string,
+  trackingNumber: string,
+  trackingCarrier: string,
+  comments: string
+): Promise<{ success: boolean; error?: string }> {
+  const shipAddrRes = await fetch(`${baseUrl(creds.storeHash)}/orders/${orderId}/shipping_addresses`, {
+    headers: headers(creds.accessToken),
+  });
+  if (!shipAddrRes.ok) {
+    return { success: false, error: `Could not fetch shipping addresses: HTTP ${shipAddrRes.status}` };
+  }
+  const shipAddrs = await shipAddrRes.json() as Array<{ id: number }>;
+  if (!shipAddrs || shipAddrs.length === 0) {
+    return { success: false, error: "No shipping address found on order" };
+  }
+
+  const productsRes = await fetch(`${baseUrl(creds.storeHash)}/orders/${orderId}/products`, {
+    headers: headers(creds.accessToken),
+  });
+  if (!productsRes.ok) {
+    return { success: false, error: `Could not fetch order products: HTTP ${productsRes.status}` };
+  }
+  const orderProducts = await productsRes.json() as Array<{ id: number; quantity: number }>;
+
+  const carrier = trackingCarrier.toLowerCase().trim();
+  const payload = {
+    order_address_id: shipAddrs[0].id,
+    tracking_number: trackingNumber,
+    shipping_provider: carrier || "",
+    tracking_carrier: carrier || "",
+    comments: comments || "",
+    items: orderProducts.map((p) => ({ order_product_id: p.id, quantity: p.quantity })),
+  };
+
+  const res = await fetch(`${baseUrl(creds.storeHash)}/orders/${orderId}/shipments`, {
+    method: "POST",
+    headers: headers(creds.accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 429) return { success: false, error: "Rate limit exceeded (429)" };
+  if (!res.ok) {
+    const err = await res.text();
+    return { success: false, error: `Shipment creation failed: HTTP ${res.status}: ${err}` };
+  }
+  return { success: true };
+}
+
+export async function updateOrderStatus(
+  creds: BigCommerceCredentials,
+  orderId: string,
+  statusId: number
+): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${baseUrl(creds.storeHash)}/orders/${orderId}`, {
+    method: "PUT",
+    headers: headers(creds.accessToken),
+    body: JSON.stringify({ status_id: statusId }),
+  });
+  if (res.status === 429) return { success: false, error: "Rate limit exceeded (429)" };
+  if (!res.ok) {
+    const err = await res.text();
+    return { success: false, error: `HTTP ${res.status}: ${err}` };
+  }
+  return { success: true };
+}
