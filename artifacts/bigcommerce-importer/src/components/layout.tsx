@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { 
@@ -7,12 +8,73 @@ import {
   FileSpreadsheet,
   Settings,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Timer,
+  Trash2
 } from "lucide-react";
+
+function useCountdown() {
+  const [expiresAt, setExpiresAt] = useState<Date | null>(null);
+  const [msLeft, setMsLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch("/api/session/status");
+        if (!res.ok) return;
+        const data = await res.json() as { active: boolean; expiresAt: string | null };
+        if (data.active && data.expiresAt) {
+          setExpiresAt(new Date(data.expiresAt));
+        } else {
+          setExpiresAt(null);
+        }
+      } catch { /* ignore */ }
+    };
+
+    fetchStatus();
+    const fetchInterval = setInterval(fetchStatus, 60_000);
+
+    interval = setInterval(() => {
+      if (expiresAt) {
+        const left = expiresAt.getTime() - Date.now();
+        setMsLeft(Math.max(0, left));
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(fetchInterval);
+      clearInterval(interval);
+    };
+  }, [expiresAt]);
+
+  useEffect(() => {
+    if (expiresAt) {
+      setMsLeft(Math.max(0, expiresAt.getTime() - Date.now()));
+    }
+  }, [expiresAt]);
+
+  return msLeft;
+}
+
+function formatCountdown(ms: number): { text: string; urgent: boolean } {
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  const urgent = ms < 60 * 60 * 1000; // under 1 hour
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const text = h > 0
+    ? `${h}h ${pad(m)}m ${pad(s)}s`
+    : `${pad(m)}m ${pad(s)}s`;
+  return { text, urgent };
+}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { data: health } = useHealthCheck();
+  const msLeft = useCountdown();
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -20,6 +82,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { name: "Templates", href: "/templates", icon: FileSpreadsheet },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
+
+  const countdown = msLeft !== null ? formatCountdown(msLeft) : null;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -42,8 +106,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-sidebar-border">
-          <div className="flex items-center text-xs text-sidebar-foreground/60">
+        <div className="px-4 pb-3 space-y-3">
+          {/* Countdown timer */}
+          <div className={`rounded-lg px-3 py-2.5 border ${countdown?.urgent ? 'border-destructive/50 bg-destructive/10' : 'border-sidebar-border bg-sidebar-accent/30'}`}>
+            <div className="flex items-center gap-2 mb-1">
+              {countdown?.urgent ? (
+                <Trash2 className="w-3.5 h-3.5 text-destructive" />
+              ) : (
+                <Timer className="w-3.5 h-3.5 text-sidebar-foreground/50" />
+              )}
+              <span className="text-xs text-sidebar-foreground/60 font-medium">Auto-wipe in</span>
+            </div>
+            <div className={`text-sm font-mono font-semibold tabular-nums ${countdown?.urgent ? 'text-destructive' : 'text-sidebar-foreground'}`}>
+              {countdown ? countdown.text : <span className="text-sidebar-foreground/30 text-xs">Not started</span>}
+            </div>
+          </div>
+
+          {/* API status */}
+          <div className="flex items-center text-xs text-sidebar-foreground/60 px-1">
             {health?.status === "ok" ? (
               <CheckCircle2 className="w-3.5 h-3.5 mr-2 text-green-500" />
             ) : (
