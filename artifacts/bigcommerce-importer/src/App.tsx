@@ -18,9 +18,9 @@ const POLL_INTERVAL_MS = 60 * 1000;
 
 const queryClient = new QueryClient();
 
-function Router() {
+function Router({ onSignOut }: { onSignOut: () => void }) {
   return (
-    <Layout>
+    <Layout onSignOut={onSignOut}>
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/import" component={ImportWizard} />
@@ -86,7 +86,7 @@ function App() {
         {loggedInUser ? (
           <QueryClientProvider client={queryClient}>
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
+              <Router onSignOut={forceLogout} />
             </WouterRouter>
             <Toaster />
           </QueryClientProvider>

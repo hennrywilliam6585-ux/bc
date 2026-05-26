@@ -10,7 +10,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Timer,
-  Trash2
+  Trash2,
+  LogOut
 } from "lucide-react";
 
 function useCountdown() {
@@ -71,7 +72,7 @@ function formatCountdown(ms: number): { text: string; urgent: boolean } {
   return { text, urgent };
 }
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children, onSignOut }: { children: React.ReactNode; onSignOut?: () => void }) {
   const [location] = useLocation();
   const { data: health } = useHealthCheck();
   const msLeft = useCountdown();
@@ -131,6 +132,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
             )}
             API Status: {health?.status || "Checking..."}
           </div>
+
+          {/* Sign out */}
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              className="flex items-center w-full px-3 py-2 text-sm font-medium rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+            >
+              <LogOut className="mr-3 h-4 w-4 text-sidebar-foreground/50" />
+              Sign out
+            </button>
+          )}
         </div>
       </div>
 
