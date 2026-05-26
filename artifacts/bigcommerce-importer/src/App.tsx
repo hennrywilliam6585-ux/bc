@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -10,6 +11,9 @@ import JobDetail from "@/pages/job-detail";
 import Templates from "@/pages/templates";
 import Settings from "@/pages/settings";
 import NotFound from "@/pages/not-found";
+import Login from "@/pages/login";
+
+const SESSION_KEY = "bc_importer_user";
 
 const queryClient = new QueryClient();
 
@@ -29,16 +33,32 @@ function Router() {
 }
 
 function App() {
+  const [loggedInUser, setLoggedInUser] = useState<string | null>(
+    () => sessionStorage.getItem(SESSION_KEY)
+  );
+
+  const handleLogin = (userId: string) => {
+    sessionStorage.setItem(SESSION_KEY, userId);
+    setLoggedInUser(userId);
+  };
+
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
-          <Toaster />
-        </TooltipProvider>
-      </QueryClientProvider>
+      <TooltipProvider>
+        {loggedInUser ? (
+          <QueryClientProvider client={queryClient}>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Router />
+            </WouterRouter>
+            <Toaster />
+          </QueryClientProvider>
+        ) : (
+          <>
+            <Login onLogin={handleLogin} />
+            <Toaster />
+          </>
+        )}
+      </TooltipProvider>
     </ThemeProvider>
   );
 }
