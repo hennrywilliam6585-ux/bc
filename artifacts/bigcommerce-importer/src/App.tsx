@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -14,6 +14,7 @@ import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 
 const SESSION_KEY = "bc_importer_user";
+const POLL_INTERVAL_MS = 60 * 1000;
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,43 @@ function App() {
   const [loggedInUser, setLoggedInUser] = useState<string | null>(
     () => sessionStorage.getItem(SESSION_KEY)
   );
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const forceLogout = () => {
+    sessionStorage.removeItem(SESSION_KEY);
+    setLoggedInUser(null);
+    queryClient.clear();
+  };
+
+  const checkSessionExpiry = async () => {
+    try {
+      const res = await fetch("/api/session/status");
+      if (!res.ok) return;
+      const data = await res.json() as { active: boolean; msRemaining: number | null };
+      if (data.active && data.msRemaining !== null && data.msRemaining <= 0) {
+        forceLogout();
+      }
+    } catch {
+      // network hiccup — don't logout
+    }
+  };
+
+  useEffect(() => {
+    if (!loggedInUser) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+
+    fetch("/api/session/start", { method: "POST" }).catch(() => {});
+
+    checkSessionExpiry();
+    pollRef.current = setInterval(checkSessionExpiry, POLL_INTERVAL_MS);
+
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedInUser]);
 
   const handleLogin = (userId: string) => {
     sessionStorage.setItem(SESSION_KEY, userId);

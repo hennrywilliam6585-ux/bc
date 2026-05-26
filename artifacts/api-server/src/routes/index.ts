@@ -5,6 +5,7 @@ import importsRouter from "./imports";
 import templatesRouter from "./templates";
 import settingsRouter from "./settings";
 import ordersRouter from "./orders";
+import sessionRouter from "./session";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(importsRouter);
 router.use(templatesRouter);
 router.use(settingsRouter);
 router.use(ordersRouter);
+router.use(sessionRouter);
 
 export default router;
