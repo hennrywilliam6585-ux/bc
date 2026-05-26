@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { 
@@ -15,21 +15,25 @@ import {
 } from "lucide-react";
 
 function useCountdown() {
-  const [expiresAt, setExpiresAt] = useState<Date | null>(null);
   const [msLeft, setMsLeft] = useState<number | null>(null);
+  const expiresAtRef = useRef<Date | null>(null);
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-
     const fetchStatus = async () => {
       try {
         const res = await fetch("/api/session/status");
         if (!res.ok) return;
         const data = await res.json() as { active: boolean; expiresAt: string | null };
         if (data.active && data.expiresAt) {
-          setExpiresAt(new Date(data.expiresAt));
+          const newDate = new Date(data.expiresAt);
+          // Only update ref if timestamp actually changed — prevents re-render loops
+          if (!expiresAtRef.current || expiresAtRef.current.getTime() !== newDate.getTime()) {
+            expiresAtRef.current = newDate;
+            setMsLeft(Math.max(0, newDate.getTime() - Date.now()));
+          }
         } else {
-          setExpiresAt(null);
+          expiresAtRef.current = null;
+          setMsLeft(null);
         }
       } catch { /* ignore */ }
     };
@@ -37,24 +41,18 @@ function useCountdown() {
     fetchStatus();
     const fetchInterval = setInterval(fetchStatus, 60_000);
 
-    interval = setInterval(() => {
-      if (expiresAt) {
-        const left = expiresAt.getTime() - Date.now();
+    const tickInterval = setInterval(() => {
+      if (expiresAtRef.current) {
+        const left = expiresAtRef.current.getTime() - Date.now();
         setMsLeft(Math.max(0, left));
       }
     }, 1000);
 
     return () => {
       clearInterval(fetchInterval);
-      clearInterval(interval);
+      clearInterval(tickInterval);
     };
-  }, [expiresAt]);
-
-  useEffect(() => {
-    if (expiresAt) {
-      setMsLeft(Math.max(0, expiresAt.getTime() - Date.now()));
-    }
-  }, [expiresAt]);
+  }, []); // runs once on mount — no dependency loop
 
   return msLeft;
 }
